@@ -58,6 +58,10 @@ npm run build  # production build
 - PIN/passcode hashed with PBKDF2 before storage (never stored in plaintext)
 - Rate limiting on failed passcode attempts with exponential backoff
 
+## Known Issues
+
+- **Cross-device sync while unlocked** — When a note is unlocked, the decrypted content is written to the file so Obsidian can render it natively. If the vault syncs (e.g. via iCloud) while the note is unlocked on one device, the decrypted content may briefly appear on other devices. Locking the note or navigating away writes the placeholder back. A fix to automatically conceal the file on disk when not actively viewing it is planned.
+
 ## License
 
 MIT
