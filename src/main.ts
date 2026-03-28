@@ -587,6 +587,8 @@ export default class SecretsPlugin extends Plugin {
 
 	private lockNoteByFile(file: TFile): void {
 		this.noteManager.lockNote(file.path);
+		this.cachedKey = null;
+		this.cachedKeyAt = 0;
 		this.clearOverlay(file.path);
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (view && view.file?.path === file.path) {
