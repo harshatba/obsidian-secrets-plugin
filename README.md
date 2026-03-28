@@ -1,12 +1,12 @@
 # Secrets - Obsidian Plugin
 
-Apple Notes-style per-note protection for Obsidian. Protect individual notes with AES-256-GCM encryption and unlock them with Touch ID, Face ID, or a PIN/passcode.
+Apple Notes-style per-note protection for Obsidian. Protect individual notes with AES-256-GCM encryption and unlock them with Touch ID on Mac or a PIN/passcode on mobile.
 
 ## Features
 
 - **Per-note encryption** - Protect any markdown note; encrypted at rest and unsearchable when locked
-- **Touch ID / Face ID** - Unlock notes with biometrics on macOS (via LocalAuthentication framework)
-- **PIN / Passcode** - Numeric PIN or alphanumeric passcode for mobile and as a fallback on desktop
+- **Touch ID** - Unlock notes with biometrics on macOS (via LocalAuthentication framework)
+- **PIN / Passcode** - Numeric PIN or alphanumeric passcode for mobile (iOS/Android) and as a fallback on desktop
 - **Cross-device sync** - Protect a note on iPhone, unlock it on Mac (encryption key syncs via iCloud)
 - **Auto-lock** - Configurable timeout to automatically lock notes after inactivity
 - **Lock on blur** - Optionally lock all notes when Obsidian loses focus
@@ -16,7 +16,7 @@ Apple Notes-style per-note protection for Obsidian. Protect individual notes wit
 
 1. **Protect a note** - Use the lock icon in the view header or right-click a file and select "Protect note"
 2. **Set a passcode** - On first use, choose a numeric PIN or alphanumeric passcode (shared across all protected notes)
-3. **Authenticate** - Touch ID on Mac, or enter your passcode on mobile
+3. **Authenticate** - Touch ID on Mac, or enter your PIN/passcode on mobile (Obsidian plugins can't access Face ID on iOS)
 4. **View & edit** - Unlocked notes render markdown in reading mode; switch to edit mode via the pencil icon
 5. **Lock** - Notes auto-lock after a timeout, or lock manually via the lock icon
 
