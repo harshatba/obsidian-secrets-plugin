@@ -29,7 +29,6 @@ export default class SecretsPlugin extends Plugin {
 	private cachedKey: string | null = null;
 	private cachedKeyAt = 0;
 	private authInProgress = false;
-	private exposedFilePath: string | null = null;
 	readonly AUTH_CACHE_MS = 30000;
 
 	async onload() {
@@ -258,9 +257,6 @@ export default class SecretsPlugin extends Plugin {
 		const file = view.file;
 		if (!file) return;
 
-		// Conceal the previously exposed file (write placeholder back)
-		await this.concealExposedFile(file.path);
-
 		// Clear stale overlays from this view
 		this.clearOverlaysOnView(view);
 
@@ -269,12 +265,7 @@ export default class SecretsPlugin extends Plugin {
 			isProtected = await this.noteManager.isProtected(file);
 		}
 
-		if (isProtected && this.noteManager.isUnlocked(file.path)) {
-			// Expose decrypted content so Obsidian renders it
-			await this.noteManager.exposeDecrypted(file);
-			this.exposedFilePath = file.path;
-			this.clearOverlay(file.path);
-		} else if (isProtected) {
+		if (isProtected && !this.noteManager.isUnlocked(file.path)) {
 			this.showLockOverlay(view, file);
 		} else {
 			this.clearOverlay(file.path);
@@ -282,29 +273,6 @@ export default class SecretsPlugin extends Plugin {
 
 		this.setViewActions(view, file, isProtected);
 		this.updateStatusBar();
-	}
-
-	/**
-	 * If we have a file with decrypted content on disk and we're navigating
-	 * away from it, re-encrypt and write the placeholder back.
-	 */
-	private async concealExposedFile(newFilePath: string): Promise<void> {
-		if (!this.exposedFilePath) return;
-		if (this.exposedFilePath === newFilePath) return;
-
-		const key = this.cachedKey;
-		if (!key) {
-			this.exposedFilePath = null;
-			return;
-		}
-
-		const oldFile = this.app.vault.getAbstractFileByPath(
-			this.exposedFilePath
-		);
-		if (oldFile instanceof TFile) {
-			await this.noteManager.concealAndEncrypt(oldFile, key);
-		}
-		this.exposedFilePath = null;
 	}
 
 	private clearOverlaysOnView(view: MarkdownView): void {
@@ -461,8 +429,7 @@ export default class SecretsPlugin extends Plugin {
 		try {
 			await this.noteManager.protectNote(file, key);
 			// File content stays as-is (note is unlocked after protect)
-			// Track it as exposed so we conceal when navigating away
-			this.exposedFilePath = file.path;
+			// Obsidian continues rendering it natively
 			const view =
 				this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (view && view.file?.path === file.path) {
@@ -499,7 +466,7 @@ export default class SecretsPlugin extends Plugin {
 		const success = await this.noteManager.unlockNote(file, key);
 		if (success) {
 			// Decrypted content is now in the file — Obsidian renders it natively.
-			this.exposedFilePath = file.path;
+			// Just clear the lock overlay and update actions.
 			this.clearOverlay(file.path);
 			const view =
 				this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -524,9 +491,6 @@ export default class SecretsPlugin extends Plugin {
 			);
 			if (!key) return;
 			await this.noteManager.unprotectNote(file, key);
-			if (this.exposedFilePath === file.path) {
-				this.exposedFilePath = null;
-			}
 			this.clearOverlay(file.path);
 			const view =
 				this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -551,7 +515,6 @@ export default class SecretsPlugin extends Plugin {
 		}
 
 		await this.noteManager.lockNote(file, this.cachedKey!);
-		this.exposedFilePath = null;
 		this.cachedKey = null;
 		this.cachedKeyAt = 0;
 
@@ -569,7 +532,6 @@ export default class SecretsPlugin extends Plugin {
 		if (!key) return; // Can't lock without key to re-encrypt
 
 		await this.noteManager.lockAll(key);
-		this.exposedFilePath = null;
 		this.overlays.forEach((ov) => ov.clear());
 		this.overlays.clear();
 		this.cachedKey = null;
