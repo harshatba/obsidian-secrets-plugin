@@ -34,7 +34,11 @@ export default class SecretsPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		this.noteManager = new NoteManager(this.app, () => this.settings);
+		this.noteManager = new NoteManager(
+			this.app,
+			() => this.settings,
+			() => this.saveSettings()
+		);
 		this.authService = new AuthService(
 			this.app,
 			() => this.settings,
@@ -394,9 +398,7 @@ export default class SecretsPlugin extends Plugin {
 				this.settings.encryptionSalt,
 				this.settings.pbkdf2Iterations
 			);
-			const encrypted =
-				this.noteManager.buildEncryptedContent(payload);
-			await this.app.vault.modify(file, encrypted);
+			await this.noteManager.saveEncrypted(file, payload);
 		} catch (e) {
 			console.error("Secrets: failed to save encrypted content", e);
 			new Notice("Failed to save encrypted content");

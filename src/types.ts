@@ -11,6 +11,8 @@ export interface SecretsPluginSettings {
 	pinSalt: string;
 	/** Type of PIN: "numeric" for number pad, "alphanumeric" for keyboard, "" for not set */
 	pinType: "numeric" | "alphanumeric" | "";
+	/** Encrypted payloads keyed by file path — stored in data.json, not in the markdown file */
+	encryptedNotes: Record<string, EncryptedPayload>;
 }
 
 export const DEFAULT_SETTINGS: SecretsPluginSettings = {
@@ -22,6 +24,7 @@ export const DEFAULT_SETTINGS: SecretsPluginSettings = {
 	pinHash: "",
 	pinSalt: "",
 	pinType: "",
+	encryptedNotes: {},
 };
 
 export interface EncryptedPayload {
