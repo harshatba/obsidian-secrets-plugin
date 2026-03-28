@@ -1,0 +1,9 @@
+{
+  "id": "obsidian-secrets",
+  "name": "Secrets",
+  "version": "1.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "Protect individual notes with password or biometric authentication (Touch ID / Face ID). Notes are AES-256-GCM encrypted at rest and unsearchable when locked.",
+  "author": "Harsha Tanguturi",
+  "isDesktopOnly": false
+}

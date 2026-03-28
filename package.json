@@ -1,0 +1,26 @@
+{
+  "name": "obsidian-secrets-plugin",
+  "version": "1.0.0",
+  "description": "Apple Notes-style per-note protection with encryption and biometric unlock for Obsidian",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+  },
+  "keywords": [
+    "obsidian",
+    "encryption",
+    "biometric",
+    "touch-id",
+    "face-id",
+    "note-protection"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.0",
+    "obsidian": "latest",
+    "tslib": "^2.8.0",
+    "typescript": "^5.8.0"
+  }
+}
