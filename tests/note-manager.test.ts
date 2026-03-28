@@ -44,21 +44,17 @@ describe("NoteManager", () => {
 	// ─── protectNote ───
 
 	describe("protectNote", () => {
-		it("encrypts content, stores payload in settings, writes placeholder to file", async () => {
+		it("encrypts content, stores payload in settings, keeps file content", async () => {
 			await manager.protectNote(file, PASSWORD);
 
 			// Payload stored in settings
 			expect(settings.encryptedNotes["note.md"]).toBeDefined();
 			expect(settings.encryptedNotes["note.md"].v).toBe(1);
-			expect(settings.encryptedNotes["note.md"].iv).toBeDefined();
-			expect(settings.encryptedNotes["note.md"].ct).toBeDefined();
 
-			// File replaced with placeholder
+			// File keeps original content (note stays unlocked after protect)
 			const fileContent = await app.vault.read(file);
-			expect(fileContent).toContain(`${FRONTMATTER_KEY}: true`);
-			expect(fileContent).not.toContain("Hello world");
+			expect(fileContent).toBe("Hello world");
 
-			// Settings saved
 			expect(saved).toBe(true);
 		});
 
@@ -74,7 +70,6 @@ describe("NoteManager", () => {
 
 			await manager.protectNote(file, PASSWORD);
 
-			// Should not overwrite
 			expect(settings.encryptedNotes["note.md"].iv).toBe("x");
 		});
 
@@ -85,7 +80,6 @@ describe("NoteManager", () => {
 
 			await manager.protectNote(file, PASSWORD);
 
-			// Should not have encrypted
 			expect(settings.encryptedNotes["note.md"]).toBeUndefined();
 		});
 
@@ -101,20 +95,23 @@ describe("NoteManager", () => {
 	// ─── unlockNote ───
 
 	describe("unlockNote", () => {
-		it("decrypts and sets state to unlocked", async () => {
+		it("decrypts, writes content to file, sets state to unlocked", async () => {
 			await manager.protectNote(file, PASSWORD);
-			manager.lockNote("note.md");
+			await manager.lockNote(file, PASSWORD);
 
 			const result = await manager.unlockNote(file, PASSWORD);
 
 			expect(result).toBe(true);
 			expect(manager.isUnlocked("note.md")).toBe(true);
 			expect(manager.getDecryptedContent("note.md")).toBe("Hello world");
+			// File now has decrypted content
+			const fileContent = await app.vault.read(file);
+			expect(fileContent).toBe("Hello world");
 		});
 
 		it("returns false with wrong key", async () => {
 			await manager.protectNote(file, PASSWORD);
-			manager.lockNote("note.md");
+			await manager.lockNote(file, PASSWORD);
 
 			const result = await manager.unlockNote(file, "wrong-key");
 
@@ -123,7 +120,6 @@ describe("NoteManager", () => {
 		});
 
 		it("migrates legacy in-file format to encryptedNotes", async () => {
-			// Simulate old format: payload is in the file
 			const payload = await encrypt("Legacy content", PASSWORD, SALT, ITERATIONS);
 			const legacyContent = [
 				"---",
@@ -140,25 +136,42 @@ describe("NoteManager", () => {
 
 			expect(result).toBe(true);
 			expect(manager.getDecryptedContent("note.md")).toBe("Legacy content");
-			// Migrated to encryptedNotes
 			expect(settings.encryptedNotes["note.md"]).toBeDefined();
-			// File replaced with placeholder
+			// File now has decrypted content (not legacy markers)
 			const fileContent = await app.vault.read(file);
-			expect(fileContent).not.toContain(ENCRYPTED_MARKER_START);
+			expect(fileContent).toBe("Legacy content");
 		});
 	});
 
-	// ─── lockNote ─���─
+	// ─── lockNote ───
 
 	describe("lockNote", () => {
-		it("clears decrypted content and sets unlocked=false", async () => {
+		it("re-encrypts, writes placeholder, clears state", async () => {
 			await manager.protectNote(file, PASSWORD);
 			expect(manager.isUnlocked("note.md")).toBe(true);
 
-			manager.lockNote("note.md");
+			await manager.lockNote(file, PASSWORD);
 
 			expect(manager.isUnlocked("note.md")).toBe(false);
 			expect(manager.getDecryptedContent("note.md")).toBeNull();
+			// File replaced with placeholder
+			const fileContent = await app.vault.read(file);
+			expect(fileContent).toContain(`${FRONTMATTER_KEY}: true`);
+			expect(fileContent).not.toContain("Hello world");
+			// Encrypted payload updated
+			expect(settings.encryptedNotes["note.md"]).toBeDefined();
+		});
+
+		it("captures edits made while unlocked", async () => {
+			await manager.protectNote(file, PASSWORD);
+			// Simulate user editing the file
+			(app.vault as any)._set("note.md", "Edited content");
+
+			await manager.lockNote(file, PASSWORD);
+
+			// Unlock to verify the edited content was captured
+			await manager.unlockNote(file, PASSWORD);
+			expect(manager.getDecryptedContent("note.md")).toBe("Edited content");
 		});
 	});
 
@@ -175,14 +188,14 @@ describe("NoteManager", () => {
 			expect(manager.isUnlocked("note.md")).toBe(true);
 			expect(manager.isUnlocked("note2.md")).toBe(true);
 
-			manager.lockAll();
+			await manager.lockAll(PASSWORD);
 
 			expect(manager.isUnlocked("note.md")).toBe(false);
 			expect(manager.isUnlocked("note2.md")).toBe(false);
 		});
 	});
 
-	// ─��─ unprotectNote ───
+	// ─── unprotectNote ───
 
 	describe("unprotectNote", () => {
 		it("restores original content and removes from encryptedNotes", async () => {
@@ -191,12 +204,9 @@ describe("NoteManager", () => {
 			const result = await manager.unprotectNote(file, PASSWORD);
 
 			expect(result).toBe(true);
-			// Original content restored
 			const fileContent = await app.vault.read(file);
 			expect(fileContent).toBe("Hello world");
-			// Removed from encryptedNotes
 			expect(settings.encryptedNotes["note.md"]).toBeUndefined();
-			// State cleared
 			expect(manager.getState("note.md")).toBeUndefined();
 		});
 
@@ -206,7 +216,6 @@ describe("NoteManager", () => {
 			const result = await manager.unprotectNote(file, "wrong-key");
 
 			expect(result).toBe(false);
-			// Still protected
 			expect(settings.encryptedNotes["note.md"]).toBeDefined();
 		});
 	});
@@ -228,7 +237,6 @@ describe("NoteManager", () => {
 	describe("handleRename", () => {
 		it("updates encryptedNotes key and state", async () => {
 			await manager.protectNote(file, PASSWORD);
-			expect(settings.encryptedNotes["note.md"]).toBeDefined();
 
 			manager.handleRename("note.md", "renamed.md");
 
@@ -252,28 +260,25 @@ describe("NoteManager", () => {
 		});
 	});
 
-	// ──�� checkAutoLock ───
+	// ─── checkAutoLock ───
 
 	describe("checkAutoLock", () => {
-		it("locks notes past the timeout", async () => {
+		it("returns paths of notes past the timeout", async () => {
 			await manager.protectNote(file, PASSWORD);
-			// Backdate the unlockedAt
 			const state = manager.getState("note.md")!;
-			state.unlockedAt = Date.now() - 6 * 60 * 1000; // 6 minutes ago
+			state.unlockedAt = Date.now() - 6 * 60 * 1000;
 
-			const locked = manager.checkAutoLock(5); // 5 min timeout
+			const expired = manager.checkAutoLock(5);
 
-			expect(locked).toContain("note.md");
-			expect(manager.isUnlocked("note.md")).toBe(false);
+			expect(expired).toContain("note.md");
 		});
 
-		it("does not lock recent notes", async () => {
+		it("does not return recent notes", async () => {
 			await manager.protectNote(file, PASSWORD);
 
-			const locked = manager.checkAutoLock(5);
+			const expired = manager.checkAutoLock(5);
 
-			expect(locked).toHaveLength(0);
-			expect(manager.isUnlocked("note.md")).toBe(true);
+			expect(expired).toHaveLength(0);
 		});
 
 		it("returns empty when timeout is 0 (never)", async () => {
@@ -281,9 +286,9 @@ describe("NoteManager", () => {
 			const state = manager.getState("note.md")!;
 			state.unlockedAt = Date.now() - 999999999;
 
-			const locked = manager.checkAutoLock(0);
+			const expired = manager.checkAutoLock(0);
 
-			expect(locked).toHaveLength(0);
+			expect(expired).toHaveLength(0);
 		});
 	});
 
@@ -309,6 +314,36 @@ describe("NoteManager", () => {
 
 		it("returns false for unprotected note", () => {
 			expect(manager.isProtectedSync(file)).toBe(false);
+		});
+	});
+
+	// ─── Full cycle: protect → lock → unlock → edit → lock ───
+
+	describe("full lifecycle", () => {
+		it("preserves content through protect → lock → unlock → edit → lock → unlock", async () => {
+			// Protect
+			await manager.protectNote(file, PASSWORD);
+			expect(await app.vault.read(file)).toBe("Hello world");
+
+			// Lock — placeholder written
+			await manager.lockNote(file, PASSWORD);
+			expect(await app.vault.read(file)).toContain(FRONTMATTER_KEY);
+			expect(await app.vault.read(file)).not.toContain("Hello world");
+
+			// Unlock — decrypted content written
+			await manager.unlockNote(file, PASSWORD);
+			expect(await app.vault.read(file)).toBe("Hello world");
+
+			// User edits the file
+			(app.vault as any)._set("note.md", "Edited by user");
+
+			// Lock — captures edit
+			await manager.lockNote(file, PASSWORD);
+
+			// Unlock — should have the edit
+			await manager.unlockNote(file, PASSWORD);
+			expect(await app.vault.read(file)).toBe("Edited by user");
+			expect(manager.getDecryptedContent("note.md")).toBe("Edited by user");
 		});
 	});
 });

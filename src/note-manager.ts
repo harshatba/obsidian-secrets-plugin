@@ -11,7 +11,7 @@ import {
 	FORMAT_VERSION,
 } from "./types";
 
-/** Placeholder content written to the markdown file for protected notes */
+/** Placeholder content written to the markdown file for locked notes */
 function buildPlaceholder(): string {
 	return [
 		"---",
@@ -40,16 +40,13 @@ export class NoteManager {
 
 	isProtectedSync(file: TFile): boolean {
 		if (this.states.has(file.path)) return true;
-		// Check plugin data
 		if (this.settings().encryptedNotes[file.path]) return true;
-		// Fall back to metadata cache (frontmatter)
 		const cache = this.app.metadataCache.getFileCache(file);
 		return cache?.frontmatter?.[FRONTMATTER_KEY] === true;
 	}
 
 	async isProtected(file: TFile): Promise<boolean> {
 		if (this.settings().encryptedNotes[file.path]) return true;
-		// Legacy: check for in-file encrypted markers (migration support)
 		const content = await this.app.vault.read(file);
 		return content.includes(ENCRYPTED_MARKER_START);
 	}
@@ -74,7 +71,6 @@ export class NoteManager {
 		return paths;
 	}
 
-	/** Legacy: extract payload from in-file markers (for migration) */
 	private extractPayloadFromContent(content: string): EncryptedPayload | null {
 		const startIdx = content.indexOf(ENCRYPTED_MARKER_START);
 		const endIdx = content.indexOf(ENCRYPTED_MARKER_END);
@@ -94,18 +90,15 @@ export class NoteManager {
 		}
 	}
 
-	/** Get the encrypted payload for a file — from plugin data or legacy in-file format */
 	private async getPayload(file: TFile): Promise<EncryptedPayload | null> {
 		const stored = this.settings().encryptedNotes[file.path];
 		if (stored) return stored;
 
-		// Legacy migration: read from file content
 		const content = await this.app.vault.read(file);
 		return this.extractPayloadFromContent(content);
 	}
 
 	async protectNote(file: TFile, password: string): Promise<void> {
-		// Already protected?
 		if (this.settings().encryptedNotes[file.path]) {
 			new Notice("Note is already protected");
 			return;
@@ -134,9 +127,8 @@ export class NoteManager {
 		settings.encryptedNotes[file.path] = payload;
 		await this.saveSettings();
 
-		// Replace file content with clean placeholder (nothing searchable)
-		await this.app.vault.modify(file, buildPlaceholder());
-
+		// File keeps the original content (note is unlocked after protect).
+		// The file will be replaced with placeholder when the user locks it.
 		this.states.set(file.path, {
 			path: file.path,
 			unlocked: true,
@@ -167,9 +159,10 @@ export class NoteManager {
 			if (!settings.encryptedNotes[file.path]) {
 				settings.encryptedNotes[file.path] = payload;
 				await this.saveSettings();
-				// Replace in-file encrypted blob with clean placeholder
-				await this.app.vault.modify(file, buildPlaceholder());
 			}
+
+			// Write decrypted content to file so Obsidian renders it natively
+			await this.app.vault.modify(file, decrypted);
 
 			this.states.set(file.path, {
 				path: file.path,
@@ -183,6 +176,54 @@ export class NoteManager {
 		}
 	}
 
+	/**
+	 * Lock a note: re-encrypt current file content, store in plugin data,
+	 * then replace file with placeholder.
+	 */
+	async lockNote(file: TFile, password: string): Promise<void> {
+		const state = this.states.get(file.path);
+		if (!state?.unlocked) return;
+
+		// Read the current file content (user may have edited it)
+		const currentContent = await this.app.vault.read(file);
+
+		// Re-encrypt with current content
+		const settings = this.settings();
+		const payload = await encrypt(
+			currentContent,
+			password,
+			settings.encryptionSalt,
+			settings.pbkdf2Iterations
+		);
+		settings.encryptedNotes[file.path] = payload;
+		await this.saveSettings();
+
+		// Replace file with placeholder
+		await this.app.vault.modify(file, buildPlaceholder());
+
+		state.unlocked = false;
+		state.decryptedContent = null;
+		state.unlockedAt = null;
+	}
+
+	/**
+	 * Lock all notes: re-encrypt each unlocked note and write placeholders.
+	 */
+	async lockAll(password: string): Promise<void> {
+		for (const [path, state] of this.states) {
+			if (!state.unlocked) continue;
+
+			const file = this.app.vault.getAbstractFileByPath(path);
+			if (!(file instanceof TFile)) continue;
+
+			try {
+				await this.lockNote(file, password);
+			} catch (e) {
+				console.error(`Secrets: failed to lock ${path}`, e);
+			}
+		}
+	}
+
 	/** Save updated encrypted content to plugin data */
 	async saveEncrypted(
 		file: TFile,
@@ -190,23 +231,6 @@ export class NoteManager {
 	): Promise<void> {
 		this.settings().encryptedNotes[file.path] = payload;
 		await this.saveSettings();
-	}
-
-	lockNote(path: string): void {
-		const state = this.states.get(path);
-		if (state) {
-			state.unlocked = false;
-			state.decryptedContent = null;
-			state.unlockedAt = null;
-		}
-	}
-
-	lockAll(): void {
-		this.states.forEach((state) => {
-			state.unlocked = false;
-			state.decryptedContent = null;
-			state.unlockedAt = null;
-		});
 	}
 
 	async unprotectNote(file: TFile, password: string): Promise<boolean> {
@@ -225,7 +249,7 @@ export class NoteManager {
 				settings.pbkdf2Iterations
 			);
 
-			// Restore original content to file
+			// Write original content to file (it may already be there if unlocked)
 			await this.app.vault.modify(file, decrypted);
 
 			// Remove from plugin data
@@ -246,7 +270,7 @@ export class NoteManager {
 
 		const now = Date.now();
 		const timeoutMs = timeoutMinutes * 60 * 1000;
-		const locked: string[] = [];
+		const expired: string[] = [];
 
 		this.states.forEach((state, path) => {
 			if (
@@ -254,12 +278,11 @@ export class NoteManager {
 				state.unlockedAt &&
 				now - state.unlockedAt > timeoutMs
 			) {
-				this.lockNote(path);
-				locked.push(path);
+				expired.push(path);
 			}
 		});
 
-		return locked;
+		return expired;
 	}
 
 	async reEncryptAll(
@@ -303,7 +326,6 @@ export class NoteManager {
 			this.states.set(newPath, state);
 		}
 
-		// Update encrypted notes key
 		const settings = this.settings();
 		if (settings.encryptedNotes[oldPath]) {
 			settings.encryptedNotes[newPath] = settings.encryptedNotes[oldPath];

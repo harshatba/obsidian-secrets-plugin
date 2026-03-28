@@ -1,4 +1,4 @@
-/* Base overlay — covers the content area below the view header */
+/* Lock screen overlay — covers the content area when a note is locked */
 .secrets-overlay {
 	position: absolute;
 	inset: 0;
@@ -7,10 +7,6 @@
 	pointer-events: all;
 	display: flex;
 	flex-direction: column;
-}
-
-/* Lock screen variant — centered */
-.secrets-overlay:not(.secrets-overlay-content):not(.secrets-overlay-editor) {
 	align-items: center;
 	justify-content: center;
 	gap: 16px;
@@ -38,7 +34,6 @@
 	white-space: nowrap;
 }
 
-/* Action buttons (unlock) */
 .secrets-action-btn {
 	margin-top: 8px;
 	padding: 8px 32px;
@@ -57,36 +52,6 @@
 
 .secrets-action-btn-primary:hover {
 	opacity: 0.85;
-}
-
-/* Reading mode content area */
-.secrets-content-area {
-	flex: 1;
-	overflow-y: auto;
-	padding: 16px 32px;
-	font-size: var(--font-text-size);
-	line-height: var(--line-height-normal);
-}
-
-/* Editor mode */
-.secrets-editor-area {
-	flex: 1;
-	display: flex;
-	overflow: hidden;
-}
-
-.secrets-textarea {
-	flex: 1;
-	resize: none;
-	border: none;
-	outline: none;
-	padding: 16px 32px;
-	font-family: var(--font-monospace);
-	font-size: var(--font-text-size);
-	line-height: var(--line-height-normal);
-	background-color: var(--background-primary);
-	color: var(--text-normal);
-	tab-size: 4;
 }
 
 /* Modal styles */

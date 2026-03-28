@@ -31,6 +31,13 @@ export class Vault {
 			.map((p) => new TFile(p));
 	}
 
+	getAbstractFileByPath(path: string): TFile | null {
+		if (this.files.has(path)) {
+			return new TFile(path);
+		}
+		return null;
+	}
+
 	on(_event: string, _cb: (...args: any[]) => any) {
 		return { id: Math.random() };
 	}

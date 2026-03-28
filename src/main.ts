@@ -15,7 +15,7 @@ import {
 	ProtectConfirmModal,
 	UnprotectConfirmModal,
 } from "./ui/protect-modal";
-import { encrypt, generateSalt } from "./crypto";
+import { generateSalt } from "./crypto";
 import { SecretsPluginSettings, DEFAULT_SETTINGS } from "./types";
 
 export default class SecretsPlugin extends Plugin {
@@ -155,7 +155,7 @@ export default class SecretsPlugin extends Plugin {
 			)
 		);
 
-		// Show overlay when switching notes
+		// Show lock overlay when switching to a locked note
 		this.registerEvent(
 			this.app.workspace.on(
 				"active-leaf-change",
@@ -197,13 +197,15 @@ export default class SecretsPlugin extends Plugin {
 		);
 
 		// Auto-lock
-		const interval = window.setInterval(() => {
-			const locked = this.noteManager.checkAutoLock(
+		const interval = window.setInterval(async () => {
+			const expired = this.noteManager.checkAutoLock(
 				this.settings.autoLockTimeoutMinutes
 			);
-			if (locked.length > 0) {
-				const leaf = this.app.workspace.getMostRecentLeaf();
-				if (leaf) this.handleLeafChange(leaf);
+			for (const path of expired) {
+				const file = this.app.vault.getAbstractFileByPath(path);
+				if (file instanceof TFile) {
+					await this.lockNoteByFile(file);
+				}
 			}
 		}, 15000);
 		this.registerInterval(interval);
@@ -218,11 +220,16 @@ export default class SecretsPlugin extends Plugin {
 		});
 	}
 
-	onunload() {
-		this.noteManager.clearAll();
+	async onunload() {
+		// Lock all notes on unload so decrypted content doesn't persist on disk
+		const key = this.cachedKey;
+		if (key) {
+			await this.noteManager.lockAll(key);
+		}
 		this.overlays.forEach((ov) => ov.clear());
 		this.overlays.clear();
 		this.viewActions.forEach((el) => el.remove());
+		this.noteManager.clearAll();
 	}
 
 	async loadSettings() {
@@ -231,7 +238,6 @@ export default class SecretsPlugin extends Plugin {
 			DEFAULT_SETTINGS,
 			await this.loadData()
 		);
-		// Ensure encryptedNotes is always an object (older data.json may lack it)
 		if (!this.settings.encryptedNotes) {
 			this.settings.encryptedNotes = {};
 		}
@@ -241,11 +247,9 @@ export default class SecretsPlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
-	// ─── Overlay Management ───
+	// ─── View Management ───
 
 	private async handleLeafChange(leaf: WorkspaceLeaf): Promise<void> {
-		// Don't touch overlays while auth modal is open — it would
-		// remove the lock overlay and expose content underneath
 		if (this.authInProgress) return;
 
 		const view = leaf.view;
@@ -253,7 +257,7 @@ export default class SecretsPlugin extends Plugin {
 		const file = view.file;
 		if (!file) return;
 
-		// Clear any stale overlays left on this view from a previous file
+		// Clear stale overlays from this view
 		this.clearOverlaysOnView(view);
 
 		let isProtected = this.noteManager.isProtectedSync(file);
@@ -261,12 +265,8 @@ export default class SecretsPlugin extends Plugin {
 			isProtected = await this.noteManager.isProtected(file);
 		}
 
-		if (isProtected) {
-			if (this.noteManager.isUnlocked(file.path)) {
-				this.showContentOverlay(view, file);
-			} else {
-				this.showLockOverlay(view, file);
-			}
+		if (isProtected && !this.noteManager.isUnlocked(file.path)) {
+			this.showLockOverlay(view, file);
 		} else {
 			this.clearOverlay(file.path);
 		}
@@ -309,30 +309,9 @@ export default class SecretsPlugin extends Plugin {
 		}
 
 		const isUnlocked = this.noteManager.isUnlocked(file.path);
-		const overlay = this.overlays.get(file.path);
-		const isEditing = overlay?.getMode() === "editing";
 
-		if (isEditing) {
-			// Editor mode: save + cancel
-			this.viewActions.push(
-				view.addAction("x", "Cancel", () => {
-					this.showContentOverlay(view, file);
-				})
-			);
-			this.viewActions.push(
-				view.addAction("check", "Save", async () => {
-					const content = overlay!.getEditorValue();
-					await this.saveEditedContent(file, content);
-					this.showContentOverlay(view, file);
-				})
-			);
-		} else if (isUnlocked) {
-			// Reading mode: edit, lock, remove protection
-			this.viewActions.push(
-				view.addAction("pencil", "Edit", () =>
-					this.editNote(view, file)
-				)
-			);
+		if (isUnlocked) {
+			// Unlocked: lock and remove protection
 			this.viewActions.push(
 				view.addAction("lock", "Lock", () =>
 					this.lockNoteByFile(file)
@@ -360,53 +339,6 @@ export default class SecretsPlugin extends Plugin {
 		ov.showLocked(() => this.unlockNote(file));
 	}
 
-	private showContentOverlay(view: MarkdownView, file: TFile): void {
-		const decrypted = this.noteManager.getDecryptedContent(file.path);
-		if (decrypted === null) return;
-
-		this.clearOverlay(file.path);
-		const ov = new NoteOverlay(view);
-		this.overlays.set(file.path, ov);
-		ov.showContent(decrypted!);
-		this.setViewActions(view, file, true);
-	}
-
-	private editNote(view: MarkdownView, file: TFile): void {
-		const decrypted = this.noteManager.getDecryptedContent(file.path);
-		if (decrypted === null) return;
-
-		this.clearOverlay(file.path);
-		const ov = new NoteOverlay(view);
-		this.overlays.set(file.path, ov);
-		ov.showEditor(decrypted);
-		this.setViewActions(view, file, true);
-	}
-
-	private async saveEditedContent(
-		file: TFile,
-		content: string
-	): Promise<void> {
-		const state = this.noteManager.getState(file.path);
-		if (state) {
-			state.decryptedContent = content;
-			state.unlockedAt = Date.now();
-		}
-		try {
-			const key = this.cachedKey;
-			if (!key) return;
-			const payload = await encrypt(
-				content,
-				key,
-				this.settings.encryptionSalt,
-				this.settings.pbkdf2Iterations
-			);
-			await this.noteManager.saveEncrypted(file, payload);
-		} catch (e) {
-			console.error("Secrets: failed to save encrypted content", e);
-			new Notice("Failed to save encrypted content");
-		}
-	}
-
 	private clearOverlay(path: string): void {
 		const ov = this.overlays.get(path);
 		if (ov) {
@@ -417,11 +349,6 @@ export default class SecretsPlugin extends Plugin {
 
 	// ─── Authentication ───
 
-	/**
-	 * Authenticate and return encryption key.
-	 * Sets authInProgress to prevent handleLeafChange from
-	 * removing overlays while a modal is open.
-	 */
 	private async authenticateForAction(
 		reason: string
 	): Promise<string | null> {
@@ -455,15 +382,12 @@ export default class SecretsPlugin extends Plugin {
 	// ─── Note Actions ───
 
 	private async protectNote(file: TFile): Promise<void> {
-		// Step 1: Confirm the user wants to protect
 		new ProtectConfirmModal(this.app, file.basename, async () => {
 			await this.doProtect(file);
 		}).open();
 	}
 
 	private async doProtect(file: TFile): Promise<void> {
-		// Step 2: If no PIN, set one up (first time)
-		// After setup, cache the key so we don't prompt again
 		if (!this.authService.hasPin()) {
 			this.authInProgress = true;
 			try {
@@ -473,7 +397,6 @@ export default class SecretsPlugin extends Plugin {
 				this.authInProgress = false;
 			}
 
-			// Ensure encryption key exists
 			const keyReady = await this.authService.ensureEncryptionKey();
 			if (!keyReady) {
 				new Notice("Failed to set up encryption.");
@@ -483,11 +406,8 @@ export default class SecretsPlugin extends Plugin {
 				this.settings.encryptionSalt = generateSalt();
 				await this.saveSettings();
 			}
-
-			// Cache key immediately — user just proved identity by setting PIN
 			this.cacheKey();
 		} else {
-			// Ensure encryption key + salt exist
 			const keyReady = await this.authService.ensureEncryptionKey();
 			if (!keyReady) {
 				new Notice("Failed to set up encryption.");
@@ -497,24 +417,23 @@ export default class SecretsPlugin extends Plugin {
 				this.settings.encryptionSalt = generateSalt();
 				await this.saveSettings();
 			}
-
-			// Step 3: Authenticate (Touch ID or PIN)
 			const key = await this.authenticateForAction(
 				"Authenticate to protect note"
 			);
 			if (!key) return;
 		}
 
-		// Step 4: Encrypt
 		const key = this.cachedKey;
 		if (!key) return;
 
 		try {
 			await this.noteManager.protectNote(file, key);
+			// File content stays as-is (note is unlocked after protect)
+			// Obsidian continues rendering it natively
 			const view =
 				this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (view && view.file?.path === file.path) {
-				this.showContentOverlay(view, file);
+				this.setViewActions(view, file, true);
 			}
 			this.updateStatusBar();
 		} catch (e) {
@@ -534,7 +453,6 @@ export default class SecretsPlugin extends Plugin {
 			"Unlock protected note"
 		);
 		if (!key) {
-			// Auth cancelled — ensure lock overlay is still showing
 			const view =
 				this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (view && view.file?.path === file.path) {
@@ -547,10 +465,13 @@ export default class SecretsPlugin extends Plugin {
 
 		const success = await this.noteManager.unlockNote(file, key);
 		if (success) {
+			// Decrypted content is now in the file — Obsidian renders it natively.
+			// Just clear the lock overlay and update actions.
+			this.clearOverlay(file.path);
 			const view =
 				this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (view && view.file?.path === file.path) {
-				this.showContentOverlay(view, file);
+				this.setViewActions(view, file, true);
 			}
 			this.updateStatusBar();
 		} else {
@@ -585,11 +506,18 @@ export default class SecretsPlugin extends Plugin {
 		if (file) await this.unprotectNote(file);
 	}
 
-	private lockNoteByFile(file: TFile): void {
-		this.noteManager.lockNote(file.path);
+	private async lockNoteByFile(file: TFile): Promise<void> {
+		const key = this.cachedKey;
+		if (!key) {
+			// Need to re-authenticate to get the key for re-encryption
+			const authKey = await this.authenticateForAction("Lock note");
+			if (!authKey) return;
+		}
+
+		await this.noteManager.lockNote(file, this.cachedKey!);
 		this.cachedKey = null;
 		this.cachedKeyAt = 0;
-		this.clearOverlay(file.path);
+
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (view && view.file?.path === file.path) {
 			this.showLockOverlay(view, file);
@@ -599,8 +527,11 @@ export default class SecretsPlugin extends Plugin {
 		new Notice(`"${file.basename}" locked`);
 	}
 
-	private lockAllNotes(): void {
-		this.noteManager.lockAll();
+	private async lockAllNotes(): Promise<void> {
+		const key = this.cachedKey;
+		if (!key) return; // Can't lock without key to re-encrypt
+
+		await this.noteManager.lockAll(key);
 		this.overlays.forEach((ov) => ov.clear());
 		this.overlays.clear();
 		this.cachedKey = null;
