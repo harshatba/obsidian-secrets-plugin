@@ -104,12 +104,6 @@ export class NoteManager {
 		return this.extractPayloadFromContent(content);
 	}
 
-	buildEncryptedContent(payload: EncryptedPayload): string {
-		// Legacy helper — kept for saveEditedContent in main.ts
-		// Now just returns the placeholder since payload goes to data.json
-		return buildPlaceholder();
-	}
-
 	async protectNote(file: TFile, password: string): Promise<void> {
 		const content = await this.app.vault.read(file);
 

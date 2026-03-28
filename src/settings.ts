@@ -16,7 +16,7 @@ export class SecretsSettingTab extends PluginSettingTab {
 		containerEl.createEl("h2", { text: "Secrets" });
 
 		containerEl.createEl("p", {
-			text: "Notes are protected using your device authentication (Touch ID / Face ID / passcode). The encryption key is stored in your Keychain.",
+			text: "Notes are protected using your device authentication (Touch ID on Mac, passcode on mobile). Encrypted data is stored in plugin data.",
 			cls: "setting-item-description",
 		});
 

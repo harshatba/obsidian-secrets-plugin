@@ -231,6 +231,10 @@ export default class SecretsPlugin extends Plugin {
 			DEFAULT_SETTINGS,
 			await this.loadData()
 		);
+		// Ensure encryptedNotes is always an object (older data.json may lack it)
+		if (!this.settings.encryptedNotes) {
+			this.settings.encryptedNotes = {};
+		}
 	}
 
 	async saveSettings() {
@@ -572,6 +576,7 @@ export default class SecretsPlugin extends Plugin {
 			const view =
 				this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (view && view.file?.path === file.path) {
+				this.setViewActions(view, file, false);
 			}
 			this.updateStatusBar();
 		}).open();

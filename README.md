@@ -20,7 +20,7 @@ Apple Notes-style per-note protection for Obsidian. Protect individual notes wit
 4. **View & edit** - Unlocked notes render markdown in reading mode; switch to edit mode via the pencil icon
 5. **Lock** - Notes auto-lock after a timeout, or lock manually via the lock icon
 
-Protected notes are stored with AES-256-GCM encryption using PBKDF2-SHA256 key derivation (600,000 iterations). The encrypted content is wrapped in markers inside the markdown file, making it safe to sync with any cloud service.
+Protected notes are encrypted with AES-256-GCM using PBKDF2-SHA256 key derivation (600,000 iterations). The encrypted payload is stored in the plugin's data file (`data.json`), while the markdown file is replaced with a clean frontmatter-only placeholder — making protected notes completely invisible to Obsidian's search index. Safe to sync with any cloud service.
 
 ## Installation
 
@@ -54,7 +54,7 @@ npm run build  # production build
 
 - **AES-256-GCM** encryption with random 12-byte IV per encrypt operation
 - **PBKDF2-SHA256** with 600,000 iterations for key derivation
-- Encryption key cached in macOS Keychain and synced via plugin data for mobile
+- Encryption key stored in plugin data (syncs via iCloud); cached in macOS Keychain as a local backup
 - PIN/passcode hashed with PBKDF2 before storage (never stored in plaintext)
 - Rate limiting on failed passcode attempts with exponential backoff
 
