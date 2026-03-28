@@ -224,6 +224,46 @@ export class NoteManager {
 		}
 	}
 
+	/**
+	 * Write decrypted content to file so Obsidian renders it natively.
+	 * Call this when the user is actively viewing the note on this device.
+	 */
+	async exposeDecrypted(file: TFile): Promise<void> {
+		const state = this.states.get(file.path);
+		if (!state?.unlocked || !state.decryptedContent) return;
+		await this.app.vault.modify(file, state.decryptedContent);
+	}
+
+	/**
+	 * Read current file content (may have been edited), re-encrypt to
+	 * plugin data, and write placeholder back to file.
+	 * Call this when navigating away from an unlocked note.
+	 */
+	async concealAndEncrypt(file: TFile, password: string): Promise<void> {
+		const state = this.states.get(file.path);
+		if (!state?.unlocked) return;
+
+		const currentContent = await this.app.vault.read(file);
+
+		// Update in-memory state with any edits
+		state.decryptedContent = currentContent;
+		state.unlockedAt = Date.now();
+
+		// Re-encrypt and store
+		const settings = this.settings();
+		const payload = await encrypt(
+			currentContent,
+			password,
+			settings.encryptionSalt,
+			settings.pbkdf2Iterations
+		);
+		settings.encryptedNotes[file.path] = payload;
+		await this.saveSettings();
+
+		// Replace file with placeholder
+		await this.app.vault.modify(file, buildPlaceholder());
+	}
+
 	/** Save updated encrypted content to plugin data */
 	async saveEncrypted(
 		file: TFile,
