@@ -287,8 +287,6 @@ export default class SecretsPlugin extends Plugin {
 		}
 	}
 
-
-
 	private clearViewActions(): void {
 		this.viewActions.forEach((el) => el.remove());
 		this.viewActions = [];
@@ -364,7 +362,7 @@ export default class SecretsPlugin extends Plugin {
 
 	private showContentOverlay(view: MarkdownView, file: TFile): void {
 		const decrypted = this.noteManager.getDecryptedContent(file.path);
-		if (!decrypted && decrypted !== "") return;
+		if (decrypted === null) return;
 
 		this.clearOverlay(file.path);
 		const ov = new NoteOverlay(view);
@@ -593,6 +591,7 @@ export default class SecretsPlugin extends Plugin {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (view && view.file?.path === file.path) {
 			this.showLockOverlay(view, file);
+			this.setViewActions(view, file, true);
 		}
 		this.updateStatusBar();
 		new Notice(`"${file.basename}" locked`);

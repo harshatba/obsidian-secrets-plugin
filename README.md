@@ -27,7 +27,7 @@ Protected notes are encrypted with AES-256-GCM using PBKDF2-SHA256 key derivatio
 ### From source
 
 ```bash
-git clone https://github.com/<your-username>/obsidian-secrets-plugin.git
+git clone https://github.com/harshatba/obsidian-secrets-plugin.git
 cd obsidian-secrets-plugin
 npm install
 npm run build

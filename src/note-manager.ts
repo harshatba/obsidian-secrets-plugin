@@ -105,13 +105,18 @@ export class NoteManager {
 	}
 
 	async protectNote(file: TFile, password: string): Promise<void> {
-		const content = await this.app.vault.read(file);
-
 		// Already protected?
 		if (this.settings().encryptedNotes[file.path]) {
 			new Notice("Note is already protected");
 			return;
 		}
+		const cache = this.app.metadataCache.getFileCache(file);
+		if (cache?.frontmatter?.[FRONTMATTER_KEY] === true) {
+			new Notice("Note is already protected");
+			return;
+		}
+
+		const content = await this.app.vault.read(file);
 		if (content.includes(ENCRYPTED_MARKER_START)) {
 			new Notice("Note is already protected");
 			return;
