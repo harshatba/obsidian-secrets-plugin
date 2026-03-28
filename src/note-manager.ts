@@ -236,7 +236,7 @@ export class NoteManager {
 			new Notice(`"${file.basename}" is no longer protected`);
 			return true;
 		} catch {
-			new Notice("Incorrect password");
+			new Notice("Failed to decrypt note");
 			return false;
 		}
 	}

@@ -15,7 +15,7 @@ export class ProtectConfirmModal extends Modal {
 		contentEl.addClass("secrets-modal");
 		contentEl.createEl("h2", { text: "Protect note" });
 		contentEl.createEl("p", {
-			text: `"${this.noteName}" will be encrypted and locked. You'll need your password or biometric authentication to view it.`,
+			text: `"${this.noteName}" will be encrypted and locked. You'll need your passcode or Touch ID to view it.`,
 		});
 
 		new Setting(contentEl)
