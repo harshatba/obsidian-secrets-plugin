@@ -90,12 +90,35 @@ export class NoteManager {
 		}
 	}
 
+	private isValidPayload(payload: unknown): payload is EncryptedPayload {
+		if (!payload || typeof payload !== "object") return false;
+		const p = payload as Record<string, unknown>;
+		return (
+			typeof p.v === "number" &&
+			typeof p.iv === "string" &&
+			typeof p.ct === "string" &&
+			p.iv.length > 0 &&
+			p.ct.length > 0
+		);
+	}
+
 	private async getPayload(file: TFile): Promise<EncryptedPayload | null> {
 		const stored = this.settings().encryptedNotes[file.path];
-		if (stored) return stored;
+		if (stored) {
+			if (!this.isValidPayload(stored)) {
+				console.warn(`Secrets: malformed payload for ${file.path}`);
+				return null;
+			}
+			return stored;
+		}
 
 		const content = await this.app.vault.read(file);
-		return this.extractPayloadFromContent(content);
+		const payload = this.extractPayloadFromContent(content);
+		if (payload && !this.isValidPayload(payload)) {
+			console.warn(`Secrets: malformed legacy payload for ${file.path}`);
+			return null;
+		}
+		return payload;
 	}
 
 	async protectNote(file: TFile, password: string): Promise<void> {
@@ -265,6 +288,14 @@ export class NoteManager {
 		}
 	}
 
+	/** Reset the auto-lock timer for a note (e.g. on user activity). */
+	touchActivity(path: string): void {
+		const state = this.states.get(path);
+		if (state?.unlocked) {
+			state.unlockedAt = Date.now();
+		}
+	}
+
 	checkAutoLock(timeoutMinutes: number): string[] {
 		if (timeoutMinutes <= 0) return [];
 
@@ -318,7 +349,7 @@ export class NoteManager {
 		return count;
 	}
 
-	handleRename(oldPath: string, newPath: string): void {
+	async handleRename(oldPath: string, newPath: string): Promise<void> {
 		const state = this.states.get(oldPath);
 		if (state) {
 			this.states.delete(oldPath);
@@ -330,16 +361,16 @@ export class NoteManager {
 		if (settings.encryptedNotes[oldPath]) {
 			settings.encryptedNotes[newPath] = settings.encryptedNotes[oldPath];
 			delete settings.encryptedNotes[oldPath];
-			this.saveSettings();
+			await this.saveSettings();
 		}
 	}
 
-	handleDelete(path: string): void {
+	async handleDelete(path: string): Promise<void> {
 		this.states.delete(path);
 		const settings = this.settings();
 		if (settings.encryptedNotes[path]) {
 			delete settings.encryptedNotes[path];
-			this.saveSettings();
+			await this.saveSettings();
 		}
 	}
 

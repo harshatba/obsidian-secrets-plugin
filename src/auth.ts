@@ -108,9 +108,10 @@ export class AuthService {
 		if (!Platform.isMacOS) return false;
 		if (this.biometricAvailable !== null) return this.biometricAvailable;
 		try {
-			const { execSync } = require("child_process");
-			const result = execSync(
-				`swift -e 'import LocalAuthentication; let c = LAContext(); var e: NSError?; print(c.canEvaluatePolicy(.deviceOwnerAuthentication, error: &e) ? "Y" : "N")'`,
+			const { execFileSync } = require("child_process");
+			const result = execFileSync(
+				"swift",
+				["-e", 'import LocalAuthentication; let c = LAContext(); var e: NSError?; print(c.canEvaluatePolicy(.deviceOwnerAuthentication, error: &e) ? "Y" : "N")'],
 				{ timeout: 5000, encoding: "utf-8" }
 			).trim();
 			this.biometricAvailable = result === "Y";
@@ -128,10 +129,11 @@ export class AuthService {
 	private async promptDeviceAuth(reason: string): Promise<boolean> {
 		try {
 			const { execFile } = require("child_process");
-			const safeReason = reason.replace(/'/g, "\\'");
+			// Pass reason as a CLI argument to avoid interpolating into Swift source
 			const script = `
 import LocalAuthentication
 import Foundation
+let reason = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "Authenticate"
 let ctx = LAContext()
 var error: NSError?
 guard ctx.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
@@ -139,7 +141,7 @@ guard ctx.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
     exit(1)
 }
 let sem = DispatchSemaphore(value: 0)
-ctx.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "${safeReason}") { success, err in
+ctx.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { success, err in
     print(success ? "OK" : "FAIL")
     sem.signal()
 }
@@ -148,7 +150,7 @@ sem.wait()
 			return await new Promise<boolean>((resolve) => {
 				execFile(
 					"swift",
-					["-e", script],
+					["-e", script, reason],
 					{ timeout: 30000 },
 					(error: Error | null, stdout: string) => {
 						resolve(stdout?.trim() === "OK");
@@ -243,9 +245,10 @@ sem.wait()
 
 	private getKeychainKey(): string | null {
 		try {
-			const { execSync } = require("child_process");
-			const result = execSync(
-				`security find-generic-password -a "${KEYCHAIN_ACCOUNT}" -s "${KEYCHAIN_SERVICE}" -w`,
+			const { execFileSync } = require("child_process");
+			const result = execFileSync(
+				"security",
+				["find-generic-password", "-a", KEYCHAIN_ACCOUNT, "-s", KEYCHAIN_SERVICE, "-w"],
 				{ encoding: "utf-8", timeout: 5000 }
 			);
 			return result.trim() || null;
@@ -256,17 +259,19 @@ sem.wait()
 
 	private storeKeychainKey(key: string): boolean {
 		try {
-			const { execSync } = require("child_process");
+			const { execFileSync } = require("child_process");
 			try {
-				execSync(
-					`security delete-generic-password -a "${KEYCHAIN_ACCOUNT}" -s "${KEYCHAIN_SERVICE}" 2>/dev/null`,
+				execFileSync(
+					"security",
+					["delete-generic-password", "-a", KEYCHAIN_ACCOUNT, "-s", KEYCHAIN_SERVICE],
 					{ encoding: "utf-8" }
 				);
 			} catch {
-				// ignore
+				// ignore — key may not exist yet
 			}
-			execSync(
-				`security add-generic-password -a "${KEYCHAIN_ACCOUNT}" -s "${KEYCHAIN_SERVICE}" -w "${key}" -U`,
+			execFileSync(
+				"security",
+				["add-generic-password", "-a", KEYCHAIN_ACCOUNT, "-s", KEYCHAIN_SERVICE, "-w", key, "-U"],
 				{ encoding: "utf-8", timeout: 5000 }
 			);
 			return true;
@@ -278,9 +283,10 @@ sem.wait()
 	async clearEncryptionKey(): Promise<void> {
 		if (Platform.isMacOS) {
 			try {
-				const { execSync } = require("child_process");
-				execSync(
-					`security delete-generic-password -a "${KEYCHAIN_ACCOUNT}" -s "${KEYCHAIN_SERVICE}" 2>/dev/null`,
+				const { execFileSync } = require("child_process");
+				execFileSync(
+					"security",
+					["delete-generic-password", "-a", KEYCHAIN_ACCOUNT, "-s", KEYCHAIN_SERVICE],
 					{ encoding: "utf-8" }
 				);
 			} catch {

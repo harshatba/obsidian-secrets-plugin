@@ -238,12 +238,21 @@ describe("NoteManager", () => {
 		it("updates encryptedNotes key and state", async () => {
 			await manager.protectNote(file, PASSWORD);
 
-			manager.handleRename("note.md", "renamed.md");
+			await manager.handleRename("note.md", "renamed.md");
 
 			expect(settings.encryptedNotes["note.md"]).toBeUndefined();
 			expect(settings.encryptedNotes["renamed.md"]).toBeDefined();
 			expect(manager.isUnlocked("renamed.md")).toBe(true);
 			expect(manager.isUnlocked("note.md")).toBe(false);
+		});
+
+		it("awaits saveSettings", async () => {
+			await manager.protectNote(file, PASSWORD);
+			saved = false;
+
+			await manager.handleRename("note.md", "renamed.md");
+
+			expect(saved).toBe(true);
 		});
 	});
 
@@ -253,10 +262,19 @@ describe("NoteManager", () => {
 		it("removes from encryptedNotes and state", async () => {
 			await manager.protectNote(file, PASSWORD);
 
-			manager.handleDelete("note.md");
+			await manager.handleDelete("note.md");
 
 			expect(settings.encryptedNotes["note.md"]).toBeUndefined();
 			expect(manager.getState("note.md")).toBeUndefined();
+		});
+
+		it("awaits saveSettings", async () => {
+			await manager.protectNote(file, PASSWORD);
+			saved = false;
+
+			await manager.handleDelete("note.md");
+
+			expect(saved).toBe(true);
 		});
 	});
 
@@ -314,6 +332,52 @@ describe("NoteManager", () => {
 
 		it("returns false for unprotected note", () => {
 			expect(manager.isProtectedSync(file)).toBe(false);
+		});
+	});
+
+	// ─── Payload validation ───
+
+	describe("payload validation", () => {
+		it("rejects payload missing iv", async () => {
+			settings.encryptedNotes["note.md"] = { v: 1, iv: "", ct: "data" } as any;
+			const result = await manager.unlockNote(file, PASSWORD);
+			expect(result).toBe(false);
+		});
+
+		it("rejects payload missing ct", async () => {
+			settings.encryptedNotes["note.md"] = { v: 1, iv: "data", ct: "" } as any;
+			const result = await manager.unlockNote(file, PASSWORD);
+			expect(result).toBe(false);
+		});
+
+		it("rejects payload with wrong types", async () => {
+			settings.encryptedNotes["note.md"] = { v: "1", iv: 123, ct: null } as any;
+			const result = await manager.unlockNote(file, PASSWORD);
+			expect(result).toBe(false);
+		});
+	});
+
+	// ─── touchActivity ───
+
+	describe("touchActivity", () => {
+		it("resets unlockedAt for active notes", async () => {
+			await manager.protectNote(file, PASSWORD);
+			const state = manager.getState("note.md")!;
+			state.unlockedAt = Date.now() - 10 * 60 * 1000; // 10 min ago
+
+			manager.touchActivity("note.md");
+
+			const updated = manager.getState("note.md")!;
+			expect(Date.now() - updated.unlockedAt!).toBeLessThan(1000);
+		});
+
+		it("does nothing for locked notes", async () => {
+			await manager.protectNote(file, PASSWORD);
+			await manager.lockNote(file, PASSWORD);
+
+			manager.touchActivity("note.md");
+
+			expect(manager.getState("note.md")!.unlockedAt).toBeNull();
 		});
 	});
 

@@ -28,6 +28,8 @@ export default class SecretsPlugin extends Plugin {
 	private statusBarEl: HTMLElement | null = null;
 	private cachedKey: string | null = null;
 	private cachedKeyAt = 0;
+	/** Key retained for the session so onunload can always lock notes */
+	private sessionKey: string | null = null;
 	private authInProgress = false;
 	readonly AUTH_CACHE_MS = 30000;
 
@@ -102,11 +104,11 @@ export default class SecretsPlugin extends Plugin {
 		this.addCommand({
 			id: "lock-all",
 			name: "Lock all protected notes",
-			callback: () => this.lockAllNotes(),
+			callback: async () => await this.lockAllNotes(),
 		});
 
-		this.addRibbonIcon("lock", "Lock all protected notes", () => {
-			this.lockAllNotes();
+		this.addRibbonIcon("lock", "Lock all protected notes", async () => {
+			await this.lockAllNotes();
 		});
 
 		// File menu
@@ -176,9 +178,9 @@ export default class SecretsPlugin extends Plugin {
 
 		// Track renames/deletes
 		this.registerEvent(
-			this.app.vault.on("rename", (file, oldPath) => {
+			this.app.vault.on("rename", async (file, oldPath) => {
 				if (file instanceof TFile) {
-					this.noteManager.handleRename(oldPath, file.path);
+					await this.noteManager.handleRename(oldPath, file.path);
 					const ov = this.overlays.get(oldPath);
 					if (ov) {
 						this.overlays.delete(oldPath);
@@ -188,10 +190,19 @@ export default class SecretsPlugin extends Plugin {
 			})
 		);
 		this.registerEvent(
-			this.app.vault.on("delete", (file) => {
+			this.app.vault.on("delete", async (file) => {
 				if (file instanceof TFile) {
-					this.noteManager.handleDelete(file.path);
+					await this.noteManager.handleDelete(file.path);
 					this.clearOverlay(file.path);
+				}
+			})
+		);
+
+		// Reset auto-lock timer on editor changes
+		this.registerEvent(
+			this.app.workspace.on("editor-change", (_editor, info) => {
+				if (info.file) {
+					this.noteManager.touchActivity(info.file.path);
 				}
 			})
 		);
@@ -202,16 +213,20 @@ export default class SecretsPlugin extends Plugin {
 				this.settings.autoLockTimeoutMinutes
 			);
 			for (const path of expired) {
-				const file = this.app.vault.getAbstractFileByPath(path);
-				if (file instanceof TFile) {
-					await this.lockNoteByFile(file);
+				try {
+					const file = this.app.vault.getAbstractFileByPath(path);
+					if (file instanceof TFile) {
+						await this.lockNoteByFile(file);
+					}
+				} catch (e) {
+					console.error(`Secrets: auto-lock failed for ${path}`, e);
 				}
 			}
 		}, 15000);
 		this.registerInterval(interval);
 
-		this.registerDomEvent(window, "blur", () => {
-			if (this.settings.lockOnBlur) this.lockAllNotes();
+		this.registerDomEvent(window, "blur", async () => {
+			if (this.settings.lockOnBlur) await this.lockAllNotes();
 		});
 
 		this.app.workspace.onLayoutReady(() => {
@@ -222,7 +237,7 @@ export default class SecretsPlugin extends Plugin {
 
 	async onunload() {
 		// Lock all notes on unload so decrypted content doesn't persist on disk
-		const key = this.cachedKey;
+		const key = this.cachedKey ?? this.sessionKey;
 		if (key) {
 			await this.noteManager.lockAll(key);
 		}
@@ -364,6 +379,7 @@ export default class SecretsPlugin extends Plugin {
 			if (key) {
 				this.cachedKey = key;
 				this.cachedKeyAt = Date.now();
+				this.sessionKey = key;
 			}
 			return key;
 		} finally {
@@ -376,6 +392,7 @@ export default class SecretsPlugin extends Plugin {
 		if (key) {
 			this.cachedKey = key;
 			this.cachedKeyAt = Date.now();
+			this.sessionKey = key;
 		}
 	}
 
@@ -396,31 +413,27 @@ export default class SecretsPlugin extends Plugin {
 			} finally {
 				this.authInProgress = false;
 			}
+		}
 
-			const keyReady = await this.authService.ensureEncryptionKey();
-			if (!keyReady) {
-				new Notice("Failed to set up encryption.");
-				return;
+		const keyReady = await this.authService.ensureEncryptionKey();
+		if (!keyReady) {
+			new Notice("Failed to set up encryption.");
+			return;
+		}
+		if (!this.settings.encryptionSalt) {
+			this.settings.encryptionSalt = generateSalt();
+			await this.saveSettings();
+		}
+
+		if (!this.cachedKey || Date.now() - this.cachedKeyAt >= this.AUTH_CACHE_MS) {
+			if (this.authService.hasPin() || this.authService.isBiometricSupported()) {
+				const key = await this.authenticateForAction(
+					"Authenticate to protect note"
+				);
+				if (!key) return;
+			} else {
+				this.cacheKey();
 			}
-			if (!this.settings.encryptionSalt) {
-				this.settings.encryptionSalt = generateSalt();
-				await this.saveSettings();
-			}
-			this.cacheKey();
-		} else {
-			const keyReady = await this.authService.ensureEncryptionKey();
-			if (!keyReady) {
-				new Notice("Failed to set up encryption.");
-				return;
-			}
-			if (!this.settings.encryptionSalt) {
-				this.settings.encryptionSalt = generateSalt();
-				await this.saveSettings();
-			}
-			const key = await this.authenticateForAction(
-				"Authenticate to protect note"
-			);
-			if (!key) return;
 		}
 
 		const key = this.cachedKey;
